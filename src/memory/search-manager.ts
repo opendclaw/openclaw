@@ -20,6 +20,8 @@ export async function getMemorySearchManager(params: {
   cfg: OpenClawConfig;
   agentId: string;
   purpose?: "default" | "status";
+  /** Session key — passed through for group workspace isolation and scoped memory search. */
+  sessionKey?: string;
 }): Promise<MemorySearchManagerResult> {
   const resolved = resolveMemoryBackendConfig(params);
   if (resolved.backend === "qmd" && resolved.qmd) {

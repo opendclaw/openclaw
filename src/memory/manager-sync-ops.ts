@@ -34,6 +34,7 @@ import {
 import { type MemoryFileEntry } from "./internal.js";
 import { ensureMemoryIndexSchema } from "./memory-schema.js";
 import type { SessionFileEntry } from "./session-files.js";
+import { filterSessionFilesByScope, resolveEffectiveMemoryScope } from "./scoped-session-files.js";
 import {
   buildSessionEntry,
   listSessionFilesForAgent,
@@ -717,8 +718,21 @@ export abstract class MemoryManagerSyncOps {
       log.debug("Skipping session file sync in FTS-only mode (no embedding provider)");
       return;
     }
+    let files = await listSessionFilesForAgent(this.agentId);
 
-    const files = await listSessionFilesForAgent(this.agentId);
+    // Apply memory scope filtering for group isolation
+    const effectiveScope = resolveEffectiveMemoryScope({
+      sessionKey: this.sessionKey,
+      memoryScope: this.cfg?.session?.groupIsolation?.memoryScope,
+    });
+    if (effectiveScope !== "all" && this.sessionKey) {
+      files = filterSessionFilesByScope({
+        allFiles: files,
+        sessionKey: this.sessionKey,
+        agentId: this.agentId,
+        memoryScope: effectiveScope,
+      });
+    }
     const activePaths = new Set(files.map((file) => sessionPathForFile(file)));
     const indexAll = params.needsFullReindex || this.sessionsDirtyFiles.size === 0;
     log.debug("memory sync: indexing session files", {

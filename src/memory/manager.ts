@@ -19,6 +19,7 @@ import {
 import { isFileMissingError, statRegularFile } from "./fs-utils.js";
 import { bm25RankToScore, buildFtsQuery, mergeHybridResults } from "./hybrid.js";
 import { isMemoryPath, normalizeExtraMemoryPaths } from "./internal.js";
+import { computeMemoryManagerCacheKey } from "./manager-cache-key.js";
 import { MemoryManagerEmbeddingOps } from "./manager-embedding-ops.js";
 import { searchKeyword, searchVector } from "./manager-search.js";
 import { extractKeywords } from "./query-expansion.js";
@@ -48,6 +49,7 @@ export class MemoryIndexManager extends MemoryManagerEmbeddingOps implements Mem
   protected readonly workspaceDir: string;
   protected readonly settings: ResolvedMemorySearchConfig;
   protected provider: EmbeddingProvider | null;
+  private readonly sessionKey?: string;
   private readonly requestedProvider: "openai" | "local" | "gemini" | "voyage" | "mistral" | "auto";
   protected fallbackFrom?: "openai" | "local" | "gemini" | "voyage" | "mistral";
   protected fallbackReason?: string;
@@ -109,14 +111,21 @@ export class MemoryIndexManager extends MemoryManagerEmbeddingOps implements Mem
     cfg: OpenClawConfig;
     agentId: string;
     purpose?: "default" | "status";
+    /** Session key — used for group workspace isolation and scoped memory search. */
+    sessionKey?: string;
   }): Promise<MemoryIndexManager | null> {
     const { cfg, agentId } = params;
     const settings = resolveMemorySearchConfig(cfg, agentId);
     if (!settings) {
       return null;
     }
-    const workspaceDir = resolveAgentWorkspaceDir(cfg, agentId);
-    const key = `${agentId}:${workspaceDir}:${JSON.stringify(settings)}`;
+    const workspaceDir = resolveAgentWorkspaceDir(cfg, agentId, params.sessionKey);
+    const key = computeMemoryManagerCacheKey({
+      agentId,
+      workspaceDir,
+      settings,
+      sessionKey: params.sessionKey,
+    });
     const existing = INDEX_CACHE.get(key);
     if (existing) {
       return existing;
@@ -147,6 +156,7 @@ export class MemoryIndexManager extends MemoryManagerEmbeddingOps implements Mem
         settings,
         providerResult,
         purpose: params.purpose,
+        sessionKey: params.sessionKey,
       });
       INDEX_CACHE.set(key, manager);
       return manager;
@@ -169,6 +179,7 @@ export class MemoryIndexManager extends MemoryManagerEmbeddingOps implements Mem
     settings: ResolvedMemorySearchConfig;
     providerResult: EmbeddingProviderResult;
     purpose?: "default" | "status";
+    sessionKey?: string;
   }) {
     super();
     this.cacheKey = params.cacheKey;
@@ -176,6 +187,7 @@ export class MemoryIndexManager extends MemoryManagerEmbeddingOps implements Mem
     this.agentId = params.agentId;
     this.workspaceDir = params.workspaceDir;
     this.settings = params.settings;
+    this.sessionKey = params.sessionKey;
     this.provider = params.providerResult.provider;
     this.requestedProvider = params.providerResult.requestedProvider;
     this.fallbackFrom = params.providerResult.fallbackFrom;
