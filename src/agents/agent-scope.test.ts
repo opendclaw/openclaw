@@ -427,4 +427,94 @@ describe("resolveAgentConfig", () => {
     const agentDir = resolveAgentDir({} as OpenClawConfig, "main");
     expect(agentDir).toBe(path.join(path.resolve(home), ".openclaw", "agents", "main", "agent"));
   });
+
+  describe("resolveAgentWorkspaceDir with sessionKey (group isolation)", () => {
+    it("returns main workspace when no sessionKey is provided", () => {
+      const home = path.join(path.sep, "srv", "openclaw-home");
+      vi.stubEnv("OPENCLAW_HOME", home);
+
+      const cfg: OpenClawConfig = {
+        session: {
+          groupIsolation: {
+            mode: "isolated",
+            groups: { "120363404078961545@g.us": { label: "preseed" } },
+          },
+        },
+      };
+      const result = resolveAgentWorkspaceDir(cfg, "main");
+      // No sessionKey → returns main workspace
+      expect(result).toBe(path.join(path.resolve(home), ".openclaw", "workspace"));
+    });
+
+    it("returns isolated workspace for enrolled group session", () => {
+      const home = path.join(path.sep, "srv", "openclaw-home");
+      vi.stubEnv("OPENCLAW_HOME", home);
+
+      const cfg: OpenClawConfig = {
+        session: {
+          groupIsolation: {
+            mode: "isolated",
+            groups: { "120363404078961545@g.us": { label: "preseed-client" } },
+          },
+        },
+      };
+      const sessionKey = "agent:main:whatsapp:group:120363404078961545@g.us";
+      const result = resolveAgentWorkspaceDir(cfg, "main", sessionKey);
+      expect(result).toBe(
+        path.join(path.resolve(home), ".openclaw", "workspace-groups", "main", "preseed-client"),
+      );
+    });
+
+    it("returns main workspace for un-enrolled group when isolation is active", () => {
+      const home = path.join(path.sep, "srv", "openclaw-home");
+      vi.stubEnv("OPENCLAW_HOME", home);
+
+      const cfg: OpenClawConfig = {
+        session: {
+          groupIsolation: {
+            mode: "isolated",
+            groups: { "120363404078961545@g.us": { label: "preseed" } },
+          },
+        },
+      };
+      const sessionKey = "agent:main:whatsapp:group:999999@g.us";
+      const result = resolveAgentWorkspaceDir(cfg, "main", sessionKey);
+      // Un-enrolled group → main workspace
+      expect(result).toBe(path.join(path.resolve(home), ".openclaw", "workspace"));
+    });
+
+    it("returns main workspace when isolation mode is 'shared'", () => {
+      const home = path.join(path.sep, "srv", "openclaw-home");
+      vi.stubEnv("OPENCLAW_HOME", home);
+
+      const cfg: OpenClawConfig = {
+        session: {
+          groupIsolation: {
+            mode: "shared",
+            groups: { "120363404078961545@g.us": { label: "preseed" } },
+          },
+        },
+      };
+      const sessionKey = "agent:main:whatsapp:group:120363404078961545@g.us";
+      const result = resolveAgentWorkspaceDir(cfg, "main", sessionKey);
+      expect(result).toBe(path.join(path.resolve(home), ".openclaw", "workspace"));
+    });
+
+    it("returns main workspace for DM session even when isolation is active", () => {
+      const home = path.join(path.sep, "srv", "openclaw-home");
+      vi.stubEnv("OPENCLAW_HOME", home);
+
+      const cfg: OpenClawConfig = {
+        session: {
+          groupIsolation: {
+            mode: "isolated",
+            groups: { "120363404078961545@g.us": { label: "preseed" } },
+          },
+        },
+      };
+      const sessionKey = "agent:main:whatsapp:direct:12345";
+      const result = resolveAgentWorkspaceDir(cfg, "main", sessionKey);
+      expect(result).toBe(path.join(path.resolve(home), ".openclaw", "workspace"));
+    });
+  });
 });

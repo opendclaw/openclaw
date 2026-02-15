@@ -11,6 +11,7 @@ import {
 } from "../routing/session-key.js";
 import { resolveUserPath } from "../utils.js";
 import { normalizeSkillFilter } from "./skills/filter.js";
+import { resolveGroupWorkspaceDir } from "./group-workspace.js";
 import { resolveDefaultAgentWorkspaceDir } from "./workspace.js";
 const log = createSubsystemLogger("agent-scope");
 
@@ -252,22 +253,46 @@ export function resolveEffectiveModelFallbacks(params: {
   return agentFallbacksOverride ?? defaultFallbacks;
 }
 
-export function resolveAgentWorkspaceDir(cfg: OpenClawConfig, agentId: string) {
+export function resolveAgentWorkspaceDir(
+  cfg: OpenClawConfig,
+  agentId: string,
+  sessionKey?: string,
+) {
   const id = normalizeAgentId(agentId);
   const configured = resolveAgentConfig(cfg, id)?.workspace?.trim();
+  let mainWorkspaceDir: string;
   if (configured) {
-    return stripNullBytes(resolveUserPath(configured));
-  }
-  const defaultAgentId = resolveDefaultAgentId(cfg);
-  if (id === defaultAgentId) {
-    const fallback = cfg.agents?.defaults?.workspace?.trim();
-    if (fallback) {
-      return stripNullBytes(resolveUserPath(fallback));
+    mainWorkspaceDir = resolveUserPath(configured);
+  } else {
+    const defaultAgentId = resolveDefaultAgentId(cfg);
+    if (id === defaultAgentId) {
+      const fallback = cfg.agents?.defaults?.workspace?.trim();
+      if (fallback) {
+        mainWorkspaceDir = resolveUserPath(fallback);
+      } else {
+        mainWorkspaceDir = resolveDefaultAgentWorkspaceDir(process.env);
+      }
+    } else {
+      const stateDir = resolveStateDir(process.env);
+      mainWorkspaceDir = path.join(stateDir, `workspace-${id}`);
     }
-    return stripNullBytes(resolveDefaultAgentWorkspaceDir(process.env));
   }
-  const stateDir = resolveStateDir(process.env);
-  return stripNullBytes(path.join(stateDir, `workspace-${id}`));
+
+  // When a sessionKey is provided, check if group isolation applies
+  if (sessionKey) {
+    const isolation = cfg.session?.groupIsolation;
+    if (isolation?.mode === "isolated") {
+      return resolveGroupWorkspaceDir({
+        isolation,
+        agentId: id,
+        sessionKey,
+        mainWorkspaceDir,
+        stateDir: resolveStateDir(process.env),
+      });
+    }
+  }
+
+  return stripNullBytes(mainWorkspaceDir);
 }
 
 export function resolveAgentDir(cfg: OpenClawConfig, agentId: string) {
