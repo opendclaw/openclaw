@@ -1330,6 +1330,16 @@ export const FIELD_HELP: Record<string, string> = {
     "Enable native Slack text streaming (chat.startStream/chat.appendStream/chat.stopStream) when channels.slack.streaming is partial (default: true).",
   "channels.slack.streamMode":
     "Legacy Slack preview mode alias (replace | status_final | append); auto-migrated to channels.slack.streaming.",
+  "session.groupIsolation":
+    "Per-group workspace isolation for multi-group agents. Prevents cross-group context leakage by giving each enrolled group its own workspace, memory, and AGENTS.md.",
+  "session.groupIsolation.mode":
+    'Isolation mode: "shared" (default, all groups share one workspace) or "isolated" (enrolled groups get their own workspace).',
+  "session.groupIsolation.groups":
+    "Per-group enrollment and config, keyed by group JID. Groups not listed fall back to the shared workspace.",
+  "session.groupIsolation.sharedFiles":
+    "Files to symlink from the main workspace into isolated group workspaces (e.g. SOUL.md, USER.md, TOOLS.md).",
+  "session.groupIsolation.memoryScope":
+    'Memory search scope when isolation is active: "group-only" (default, search only the group workspace), "group+main" (group + main DM session), or "all" (current behavior).',
   "channels.telegram.customCommands":
     "Additional Telegram bot menu commands (merged with native; conflicts ignored).",
   "messages.suppressToolErrors":

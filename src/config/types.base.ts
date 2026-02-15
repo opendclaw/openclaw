@@ -102,6 +102,40 @@ export type SessionThreadBindingsConfig = {
   maxAgeHours?: number;
 };
 
+/** Group isolation mode: "shared" keeps current behavior, "isolated" gives each group its own workspace. */
+export type GroupIsolationMode = "shared" | "isolated";
+
+/** Memory search scope when group isolation is active. */
+export type GroupMemoryScope = "group-only" | "group+main" | "all";
+
+/** Per-group configuration within groupIsolation. */
+export type GroupIsolationGroupConfig = {
+  /** Human-friendly label used as the isolated workspace directory name. */
+  label?: string;
+  /** Explicit workspace path override for this group. */
+  workspace?: string;
+};
+
+/**
+ * Configuration for per-group workspace isolation.
+ *
+ * When mode is "isolated", enrolled groups get their own workspace directory
+ * with separate memory files, AGENTS.md, etc. Shared identity files (SOUL.md,
+ * USER.md, TOOLS.md) are symlinked from the main workspace.
+ *
+ * Default mode is "shared" — zero behavior change unless opted in.
+ */
+export type GroupIsolationConfig = {
+  /** Isolation mode. Default: "shared" (current behavior). */
+  mode?: GroupIsolationMode;
+  /** Per-group enrollment and configuration, keyed by group JID. */
+  groups?: Record<string, GroupIsolationGroupConfig>;
+  /** Files to symlink from the main workspace into isolated group workspaces. */
+  sharedFiles?: string[];
+  /** Memory search scope when isolation is active. Default: "group-only". */
+  memoryScope?: GroupMemoryScope;
+};
+
 export type SessionConfig = {
   scope?: SessionScope;
   /** DM session scoping (default: "main"). */
@@ -133,6 +167,12 @@ export type SessionConfig = {
   threadBindings?: SessionThreadBindingsConfig;
   /** Automatic session store maintenance (pruning, capping, file rotation). */
   maintenance?: SessionMaintenanceConfig;
+  /**
+   * Per-group workspace isolation for multi-group agents.
+   * When enabled, each enrolled group gets its own workspace with separate
+   * memory, preventing cross-group context leakage.
+   */
+  groupIsolation?: GroupIsolationConfig;
 };
 
 export type SessionMaintenanceMode = "enforce" | "warn";

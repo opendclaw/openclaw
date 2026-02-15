@@ -140,6 +140,31 @@ export const SessionSchema = z
         }
       })
       .optional(),
+    groupIsolation: z
+      .object({
+        /** Isolation mode: "shared" (default, current behavior) or "isolated" (per-group workspaces). */
+        mode: z.enum(["shared", "isolated"]).optional(),
+        /** Per-group enrollment and configuration, keyed by group JID. */
+        groups: z
+          .record(
+            z.string(),
+            z
+              .object({
+                /** Human-friendly label used as the isolated workspace directory name. */
+                label: z.string().optional(),
+                /** Explicit workspace path override for this group. */
+                workspace: z.string().optional(),
+              })
+              .strict(),
+          )
+          .optional(),
+        /** Files to symlink from the main workspace into isolated group workspaces. */
+        sharedFiles: z.array(z.string()).optional(),
+        /** Memory search scope when isolation is active (group-only | group+main | all). */
+        memoryScope: z.enum(["group-only", "group+main", "all"]).optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict()
   .optional();
