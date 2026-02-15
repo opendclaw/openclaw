@@ -1,0 +1,746 @@
+# Configuration Reference: `session.groupIsolation`
+
+**Feature:** Group Session Isolation  
+**Status:** Beta (feature/group-session-isolation branch)  
+**Config Path:** `session.groupIsolation`
+
+---
+
+## Overview
+
+The `session.groupIsolation` configuration controls workspace and memory isolation for group chat sessions. When enabled, specified groups operate in dedicated workspace directories with scoped memory search.
+
+**Default behavior:** `mode: "shared"` — all groups share the main workspace (backward compatible)
+
+---
+
+## Schema
+
+```typescript
+type GroupIsolationConfig = {
+  mode?: "shared" | "isolated";
+  groups?: Record<string, GroupConfig>;
+  sharedFiles?: string[];
+  memoryScope?: "group-only" | "group+main" | "all";
+};
+
+type GroupConfig = {
+  label?: string;
+  workspace?: string;
+};
+```
+
+### Full Configuration Example
+
+```json
+{
+  "session": {
+    "groupIsolation": {
+      "mode": "isolated",
+      "memoryScope": "group-only",
+      "groups": {
+        "120363404078961545@g.us": {
+          "label": "preseed-client",
+          "workspace": "~/custom/path/client"
+        },
+        "120363423561902447@g.us": {
+          "label": "family-vault"
+        },
+        "919820645414-1461388512@g.us": {
+          "label": "nyra-krishay"
+        }
+      },
+      "sharedFiles": [
+        "SOUL.md",
+        "USER.md",
+        "TOOLS.md",
+        "IDENTITY.md"
+      ]
+    }
+  }
+}
+```
+
+---
+
+## Fields
+
+### `mode`
+
+**Type:** `"shared" | "isolated"`  
+**Default:** `"shared"`  
+**Required:** No
+
+Controls whether group isolation is enabled.
+
+| Value | Behavior |
+|---|---|
+| `"shared"` | All groups use the main workspace (default, backward compatible) |
+| `"isolated"` | Enrolled groups get dedicated workspaces |
+
+**Examples:**
+
+```json
+// Disable isolation (default)
+{ "mode": "shared" }
+
+// Enable isolation for enrolled groups
+{ "mode": "isolated" }
+```
+
+**Notes:**
+- Changing from `"isolated"` to `"shared"` does NOT delete group workspaces
+- Existing group workspace directories remain on disk
+- Can safely toggle back to `"isolated"` later
+
+---
+
+### `groups`
+
+**Type:** `Record<string, GroupConfig>`  
+**Default:** `{}`  
+**Required:** No (but isolation has no effect if empty)
+
+Maps group JIDs to their isolation configuration.
+
+**Key format:** WhatsApp group JID (e.g., `120363404078961545@g.us`)
+
+**Value:** `GroupConfig` object with optional `label` and `workspace`
+
+**Example:**
+
+```json
+{
+  "groups": {
+    "120363404078961545@g.us": {
+      "label": "preseed-client"
+    },
+    "120363423561902447@g.us": {
+      "label": "family-vault",
+      "workspace": "~/Documents/family-workspace"
+    }
+  }
+}
+```
+
+**How to find group JIDs:**
+
+```bash
+# Check sessions.json
+cat ~/.openclaw/agents/{agentId}/sessions/sessions.json | \
+  jq '.sessions | keys | map(select(contains("@g.us")))'
+
+# Example output:
+# [
+#   "agent:luffy:whatsapp:group:120363404078961545@g.us"
+# ]
+```
+
+The group JID is everything after `:group:` (e.g., `120363404078961545@g.us`)
+
+**Notes:**
+- Groups NOT listed in this object will use the main workspace
+- Opt-in isolation: only configure groups that need isolation
+- Group JIDs must exactly match the session key format
+
+---
+
+### `groups[groupJid].label`
+
+**Type:** `string`  
+**Default:** Sanitized version of group JID  
+**Required:** No (but highly recommended)
+
+Human-friendly label used as the directory name for the group workspace.
+
+**Default behavior:** If omitted, the group JID is sanitized and used as the label:
+- `120363404078961545@g.us` → `120363404078961545-g-us`
+
+**Workspace path:**
+- With label: `~/.openclaw/workspace-groups/{agentId}/{label}/`
+- Without label: `~/.openclaw/workspace-groups/{agentId}/{sanitized-jid}/`
+
+**Examples:**
+
+```json
+// ✅ Recommended: descriptive labels
+{
+  "120363404078961545@g.us": { "label": "preseed-client-phase2" },
+  "120363423561902447@g.us": { "label": "thakkar-rasania-vault" }
+}
+
+// ⚠ Works but unclear
+{
+  "120363404078961545@g.us": { "label": "group1" },
+  "120363423561902447@g.us": { "label": "group2" }
+}
+
+// ⚠ Omitted: uses sanitized JID
+{
+  "120363404078961545@g.us": {}
+  // Becomes: ~/.openclaw/workspace-groups/luffy/120363404078961545-g-us/
+}
+```
+
+**Label restrictions:**
+- Must be filesystem-safe (no `/`, `\`, `..`, etc.)
+- Lowercase recommended
+- Use hyphens instead of spaces
+- Keep under 64 characters
+
+---
+
+### `groups[groupJid].workspace`
+
+**Type:** `string` (filesystem path)  
+**Default:** `~/.openclaw/workspace-groups/{agentId}/{label}/`  
+**Required:** No
+
+Explicit workspace directory path for the group, overriding the default location.
+
+**Use cases:**
+- Custom directory structure
+- Different storage volume
+- Network-mounted workspace
+
+**Examples:**
+
+```json
+{
+  "120363404078961545@g.us": {
+    "label": "preseed-client",
+    "workspace": "~/Dropbox/openclaw-workspaces/client"
+  },
+  "120363423561902447@g.us": {
+    "workspace": "/Volumes/SecureDrive/family-vault"
+  }
+}
+```
+
+**Path resolution:**
+- `~` expands to user home directory
+- Relative paths are resolved from `~/.openclaw/`
+- Absolute paths are used as-is
+
+**Notes:**
+- Directory is auto-created if it doesn't exist
+- Shared files are symlinked into this directory
+- Ensure path is writable by the gateway process
+
+---
+
+### `sharedFiles`
+
+**Type:** `string[]` (array of filenames)  
+**Default:** `["SOUL.md", "USER.md", "TOOLS.md"]`  
+**Required:** No
+
+Files from the main workspace to symlink into each group workspace.
+
+**Purpose:** Maintain consistent identity/config across groups while isolating memories.
+
+**Default shared files:**
+
+| File | Purpose | Why shared? |
+|---|---|---|
+| `SOUL.md` | Agent personality and core instructions | Identity is consistent |
+| `USER.md` | User information and preferences | User doesn't change |
+| `TOOLS.md` | Tool configuration and preferences | Tool config is universal |
+
+**Common additions:**
+
+```json
+{
+  "sharedFiles": [
+    "SOUL.md",
+    "USER.md",
+    "TOOLS.md",
+    "IDENTITY.md",        // Agent name/emoji
+    "memory/core-facts.md" // Shared knowledge base
+  ]
+}
+```
+
+**Files NOT shared (per-group):**
+
+| File | Purpose | Why NOT shared? |
+|---|---|---|
+| `AGENTS.md` | Group-specific instructions | Each group has different behavior |
+| `memory/*.md` | Memory files | **This is the isolation boundary** |
+| `HEARTBEAT.md` | Heartbeat behavior | Group-specific timing/actions |
+| `BOOTSTRAP.md` | Onboarding messages | Group-specific first messages |
+
+**Advanced: Maximum isolation**
+
+```json
+{
+  "sharedFiles": ["SOUL.md"]  // Only core identity shared
+}
+```
+
+**Advanced: Shared knowledge base**
+
+```json
+{
+  "sharedFiles": [
+    "SOUL.md",
+    "USER.md",
+    "TOOLS.md",
+    "memory/facts.md",           // Shared facts
+    "memory/company-info.md"     // Shared company knowledge
+  ]
+}
+```
+
+**Symlink behavior:**
+- Files are symlinked, not copied (no disk duplication)
+- Changes to shared files propagate immediately
+- Broken symlinks are logged as warnings
+- Non-existent shared files are skipped (no error)
+
+---
+
+### `memoryScope`
+
+**Type:** `"group-only" | "group+main" | "all"`  
+**Default:** `"group-only"`  
+**Required:** No
+
+Controls which session transcripts and memory files are searchable when the agent is in a group session.
+
+#### `"group-only"` (Strictest isolation)
+
+**Searchable content:**
+- Session transcript: Current group ONLY
+- Memory files: Group workspace ONLY
+
+**Not searchable:**
+- Other group transcripts
+- Main workspace memories
+- DM session transcript
+
+**Use when:**
+- Maximum separation required (client work, sensitive docs)
+- No cross-contamination allowed
+- Compliance requires strict boundaries
+
+**Example:**
+
+```json
+{
+  "memoryScope": "group-only"
+}
+```
+
+**Behavior:**
+```
+In preseed-client group:
+  Search "Phase 2" → ✅ Results from preseed-client workspace
+  Search "family"  → 🚫 No results (family-vault is isolated)
+
+In family-vault group:
+  Search "client" → 🚫 No results (preseed-client is isolated)
+```
+
+---
+
+#### `"group+main"` (Moderate isolation)
+
+**Searchable content:**
+- Session transcript: Current group + main DM session
+- Memory files: Group workspace + main workspace
+
+**Not searchable:**
+- Other group transcripts
+- Other group workspaces
+
+**Use when:**
+- You want isolation between groups
+- But still need personal context from DMs
+- Main workspace has shared knowledge
+
+**Example:**
+
+```json
+{
+  "memoryScope": "group+main"
+}
+```
+
+**Behavior:**
+```
+In preseed-client group:
+  Search "Phase 2"    → ✅ Results from preseed-client + main
+  Search "my birthday" → ✅ Results from main workspace (DM)
+  Search "family docs" → 🚫 No results (family-vault isolated)
+
+In DM session (main):
+  Search → ✅ Main workspace only (as before)
+```
+
+---
+
+#### `"all"` (No memory isolation)
+
+**Searchable content:**
+- Session transcript: All groups + all sessions
+- Memory files: All workspaces
+
+**Use when:**
+- You want workspace separation (different `AGENTS.md` per group)
+- But shared memory search across all contexts
+- You trust the agent to not mix contexts inappropriately
+
+**Example:**
+
+```json
+{
+  "memoryScope": "all"
+}
+```
+
+**Behavior:**
+```
+In any group:
+  Search → ✅ All transcripts and all workspace memories
+```
+
+**Note:** This mode provides workspace-level organization but no search isolation.
+
+---
+
+## Complete Examples
+
+### Example 1: Strict Client/Family Isolation
+
+**Scenario:** Client work and family docs must never mix.
+
+```json
+{
+  "session": {
+    "groupIsolation": {
+      "mode": "isolated",
+      "memoryScope": "group-only",
+      "groups": {
+        "120363404078961545@g.us": {
+          "label": "preseed-client"
+        },
+        "120363423561902447@g.us": {
+          "label": "family-vault"
+        }
+      },
+      "sharedFiles": ["SOUL.md", "USER.md", "TOOLS.md"]
+    }
+  }
+}
+```
+
+**Result:**
+- Client group: Only sees client workspace/transcripts
+- Family group: Only sees family workspace/transcripts
+- No cross-contamination possible
+
+---
+
+### Example 2: Multi-Project with Shared Personal Context
+
+**Scenario:** Multiple projects isolated from each other, but all can access personal DM context.
+
+```json
+{
+  "session": {
+    "groupIsolation": {
+      "mode": "isolated",
+      "memoryScope": "group+main",
+      "groups": {
+        "project-a@g.us": { "label": "project-a" },
+        "project-b@g.us": { "label": "project-b" },
+        "project-c@g.us": { "label": "project-c" }
+      },
+      "sharedFiles": ["SOUL.md", "USER.md", "TOOLS.md", "IDENTITY.md"]
+    }
+  }
+}
+```
+
+**Result:**
+- Each project: Isolated workspace + access to main workspace
+- Projects can't see each other's context
+- All projects can access personal info from DMs
+
+---
+
+### Example 3: Custom Workspace Paths
+
+**Scenario:** Different storage locations for different groups.
+
+```json
+{
+  "session": {
+    "groupIsolation": {
+      "mode": "isolated",
+      "memoryScope": "group-only",
+      "groups": {
+        "client-group@g.us": {
+          "label": "sensitive-client",
+          "workspace": "/Volumes/EncryptedDrive/client-workspace"
+        },
+        "team-group@g.us": {
+          "label": "team-coordination",
+          "workspace": "~/Dropbox/team-workspace"
+        }
+      }
+    }
+  }
+}
+```
+
+**Result:**
+- Client workspace on encrypted drive
+- Team workspace in Dropbox (synced)
+
+---
+
+### Example 4: Minimal Shared Files (Maximum Isolation)
+
+**Scenario:** Each group has completely independent identity.
+
+```json
+{
+  "session": {
+    "groupIsolation": {
+      "mode": "isolated",
+      "memoryScope": "group-only",
+      "groups": {
+        "personal-brand-a@g.us": { "label": "brand-a" },
+        "personal-brand-b@g.us": { "label": "brand-b" }
+      },
+      "sharedFiles": []  // No shared files
+    }
+  }
+}
+```
+
+**Result:**
+- Each group has its own SOUL.md, USER.md, etc.
+- Completely independent personalities/identities
+
+---
+
+### Example 5: Shared Knowledge Base
+
+**Scenario:** Isolated groups but shared company facts.
+
+```json
+{
+  "session": {
+    "groupIsolation": {
+      "mode": "isolated",
+      "memoryScope": "group-only",
+      "groups": {
+        "sales-team@g.us": { "label": "sales" },
+        "support-team@g.us": { "label": "support" }
+      },
+      "sharedFiles": [
+        "SOUL.md",
+        "USER.md",
+        "TOOLS.md",
+        "memory/company-facts.md",
+        "memory/product-specs.md"
+      ]
+    }
+  }
+}
+```
+
+**Result:**
+- Sales and support groups isolated from each other
+- Both can access shared company knowledge
+- Group-specific memories remain separate
+
+---
+
+## Validation Rules
+
+The configuration is validated at gateway startup. Invalid config will prevent startup.
+
+### Required Validations
+
+| Rule | Error Message |
+|---|---|
+| `mode` must be `"shared"` or `"isolated"` | `Invalid mode: must be "shared" or "isolated"` |
+| `memoryScope` must be `"group-only"`, `"group+main"`, or `"all"` | `Invalid memoryScope: must be "group-only", "group+main", or "all"` |
+| `groups` keys must be valid group JIDs (contain `@`) | `Invalid group JID: {key}` |
+| `label` must be filesystem-safe | `Invalid label: {label} contains invalid characters` |
+| `workspace` path must be absolute or start with `~` | `Invalid workspace path: {path}` |
+| `sharedFiles` must be array of strings | `sharedFiles must be an array of strings` |
+
+### Example Validation Errors
+
+```bash
+# Invalid mode
+Error: Invalid session.groupIsolation.mode: "partial" (must be "shared" or "isolated")
+
+# Invalid group JID
+Error: Invalid group JID in session.groupIsolation.groups: "my-group" (must contain @)
+
+# Invalid label
+Error: Invalid label in session.groupIsolation.groups["120@g.us"]: "../escape" (contains ..)
+```
+
+---
+
+## Environment Variables
+
+No environment variables directly affect `session.groupIsolation`. Standard OpenClaw environment variables apply:
+
+| Variable | Effect on Group Isolation |
+|---|---|
+| `OPENCLAW_STATE_DIR` | Changes base directory for `workspace-groups/` |
+| `DEBUG=openclaw:agents:*` | Enables workspace resolution logging |
+| `DEBUG=openclaw:memory:*` | Enables memory scope filtering logs |
+
+**Debug logging:**
+
+```bash
+# See workspace resolution
+DEBUG=openclaw:agents:workspace openclaw gateway restart
+
+# See memory scope filtering
+DEBUG=openclaw:memory:scope openclaw gateway restart
+```
+
+---
+
+## Backward Compatibility
+
+### Breaking Changes
+
+**None.** The default `mode: "shared"` maintains existing behavior.
+
+### Deprecation Warnings
+
+**None.** This is a new feature with no deprecated fields.
+
+### Migration Path
+
+Existing setups require no changes. To opt in:
+
+1. Add `session.groupIsolation` to `openclaw.json`
+2. Set `mode: "isolated"`
+3. Configure `groups` with JIDs and labels
+4. Restart gateway
+
+See [Migration Guide](../guides/migrating-to-group-isolation.md) for details.
+
+---
+
+## Related Configuration
+
+### `session.keepRecent`
+
+Controls transcript retention. Works independently of group isolation:
+
+```json
+{
+  "session": {
+    "keepRecent": 100,  // Keep last 100 messages per session
+    "groupIsolation": { /* ... */ }
+  }
+}
+```
+
+**Interaction:** Each group session has its own `keepRecent` limit.
+
+### `agents[].workspace`
+
+Agent-level workspace override. Takes precedence over group isolation:
+
+```json
+{
+  "agents": [
+    {
+      "id": "luffy",
+      "workspace": "~/custom-workspace"  // Overrides all group isolation
+    }
+  ],
+  "session": {
+    "groupIsolation": { /* ignored for luffy */ }
+  }
+}
+```
+
+**Recommendation:** Use either agent-level workspace OR group isolation, not both.
+
+---
+
+## Performance Impact
+
+### Disk Usage
+
+- **Symlinked files:** Zero overhead (filesystem pointers)
+- **Memory files:** ~1-10 MB per group (depends on usage)
+- **Memory index:** ~1-5 MB per group workspace
+
+**Estimate:** ~10-20 MB per isolated group workspace
+
+### Memory (RAM)
+
+- **Memory indexes:** Loaded on demand, not all at once
+- **Additional overhead:** ~5-15 MB per active group session
+
+### Search Performance
+
+- **Faster:** Smaller indexes per group mean faster searches
+- **No noticeable latency** for typical usage (<1000 memory files per group)
+
+### Gateway Startup
+
+- **Workspace creation:** ~10-50ms per group (one-time)
+- **Symlink creation:** <1ms per file
+- **Total startup overhead:** <100ms for typical setups
+
+---
+
+## Security Considerations
+
+### Symlink Attacks
+
+**Risk:** Malicious `workspace` path could symlink to sensitive locations.
+
+**Mitigation:**
+- Validate `workspace` paths (no `..` traversal)
+- Restrict to user home directory or explicit whitelist
+- Run gateway with least privilege
+
+### Information Leakage
+
+**Risk:** Incorrect `memoryScope` could leak context between groups.
+
+**Mitigation:**
+- Default to `"group-only"` (strictest)
+- Validate at config load time
+- Log all memory scope resolutions in debug mode
+
+### Workspace Permissions
+
+**Risk:** Group workspaces created with incorrect permissions.
+
+**Mitigation:**
+- Auto-create with `0700` permissions (user-only)
+- Warn if workspace is world-readable
+- Document recommended permissions
+
+---
+
+## See Also
+
+- [Group Session Isolation Guide](../guides/group-session-isolation-guide.md) — Usage guide
+- [Migration Guide](../guides/migrating-to-group-isolation.md) — Enabling isolation for existing setups
+- [Session Management](./session-management-compaction.md) — Session lifecycle
+- [Memory System](../../concepts/memory.md) — How memory indexing works
+
+---
+
+**Last Updated:** 2026-02-15  
+**Status:** Beta (feature/group-session-isolation branch)
