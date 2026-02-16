@@ -8,10 +8,10 @@ import { detectMime } from "../media/mime.js";
 import { sniffMimeFromBase64 } from "../media/sniff-mime-from-base64.js";
 import type { ImageSanitizationLimits } from "./image-sanitization.js";
 import type { AnyAgentTool } from "./pi-tools.types.js";
+import { type GroupPathPolicy, guardPath } from "./group-access-guard.js";
 import { assertSandboxPath } from "./sandbox-paths.js";
 import type { SandboxFsBridge } from "./sandbox/fs-bridge.js";
 import { sanitizeToolResultImages } from "./tool-images.js";
-import { type GroupPathPolicy, guardPath } from "./group-access-guard.js";
 
 // NOTE(steipete): Upstream read now does file-magic MIME detection; we keep the wrapper
 // to normalize payloads and sanitize oversized images before they hit providers.
@@ -921,6 +921,7 @@ export function wrapToolGroupAccessGuard(
               },
             ],
             isError: true,
+            details: undefined,
           };
         }
       }
