@@ -9,7 +9,8 @@
 
 import fs from "node:fs/promises";
 import path from "node:path";
-import type { GroupIsolationConfig } from "../config/types.base.js";
+import type { OpenClawConfig } from "../config/config.js";
+import type { GroupAccessControl, GroupIsolationConfig } from "../config/types.base.js";
 import { normalizeAgentId } from "../routing/session-key.js";
 
 // ── Constants ────────────────────────────────────────────────────────────────

@@ -50,12 +50,7 @@ type GroupConfig = {
           "label": "nyra-krishay"
         }
       },
-      "sharedFiles": [
-        "SOUL.md",
-        "USER.md",
-        "TOOLS.md",
-        "IDENTITY.md"
-      ]
+      "sharedFiles": ["SOUL.md", "USER.md", "TOOLS.md", "IDENTITY.md"]
     }
   }
 }
@@ -73,10 +68,10 @@ type GroupConfig = {
 
 Controls whether group isolation is enabled.
 
-| Value | Behavior |
-|---|---|
-| `"shared"` | All groups use the main workspace (default, backward compatible) |
-| `"isolated"` | Enrolled groups get dedicated workspaces |
+| Value        | Behavior                                                         |
+| ------------ | ---------------------------------------------------------------- |
+| `"shared"`   | All groups use the main workspace (default, backward compatible) |
+| `"isolated"` | Enrolled groups get dedicated workspaces                         |
 
 **Examples:**
 
@@ -89,6 +84,7 @@ Controls whether group isolation is enabled.
 ```
 
 **Notes:**
+
 - Changing from `"isolated"` to `"shared"` does NOT delete group workspaces
 - Existing group workspace directories remain on disk
 - Can safely toggle back to `"isolated"` later
@@ -139,6 +135,7 @@ cat ~/.openclaw/agents/{agentId}/sessions/sessions.json | \
 The group JID is everything after `:group:` (e.g., `120363404078961545@g.us`)
 
 **Notes:**
+
 - Groups NOT listed in this object will use the main workspace
 - Opt-in isolation: only configure groups that need isolation
 - Group JIDs must exactly match the session key format
@@ -154,9 +151,11 @@ The group JID is everything after `:group:` (e.g., `120363404078961545@g.us`)
 Human-friendly label used as the directory name for the group workspace.
 
 **Default behavior:** If omitted, the group JID is sanitized and used as the label:
+
 - `120363404078961545@g.us` → `120363404078961545-g-us`
 
 **Workspace path:**
+
 - With label: `~/.openclaw/workspace-groups/{agentId}/{label}/`
 - Without label: `~/.openclaw/workspace-groups/{agentId}/{sanitized-jid}/`
 
@@ -183,6 +182,7 @@ Human-friendly label used as the directory name for the group workspace.
 ```
 
 **Label restrictions:**
+
 - Must be filesystem-safe (no `/`, `\`, `..`, etc.)
 - Lowercase recommended
 - Use hyphens instead of spaces
@@ -199,6 +199,7 @@ Human-friendly label used as the directory name for the group workspace.
 Explicit workspace directory path for the group, overriding the default location.
 
 **Use cases:**
+
 - Custom directory structure
 - Different storage volume
 - Network-mounted workspace
@@ -218,14 +219,318 @@ Explicit workspace directory path for the group, overriding the default location
 ```
 
 **Path resolution:**
+
 - `~` expands to user home directory
 - Relative paths are resolved from `~/.openclaw/`
 - Absolute paths are used as-is
 
 **Notes:**
+
 - Directory is auto-created if it doesn't exist
 - Shared files are symlinked into this directory
 - Ensure path is writable by the gateway process
+
+---
+
+### `groups[groupJid].accessControl`
+
+**Type:** `GroupAccessControl` object  
+**Default:** `undefined` (no restrictions)  
+**Required:** No
+
+Access control constraints for a specific group. When defined, restricts file system access, tool availability, skill loading, and email routing for the group.
+
+#### GroupAccessControl Schema
+
+```typescript
+type GroupAccessControl = {
+  /** Allowed file paths (glob patterns). If set, ONLY these are accessible. */
+  allowedPaths?: string[];
+  /** Denied file paths (glob patterns). Applied after allowedPaths. */
+  deniedPaths?: string[];
+  /** Allowed skill names. If set, ONLY these skills are loaded. */
+  allowedSkills?: string[];
+  /** Denied skill names. Applied after allowedSkills. */
+  deniedSkills?: string[];
+  /** Allowed tool names. If set, ONLY these tools are available. */
+  allowedTools?: string[];
+  /** Denied tool names. Applied after allowedTools. */
+  deniedTools?: string[];
+  /** Email account ID to use for this group. */
+  emailAccount?: string;
+};
+```
+
+#### Example Configuration
+
+```json
+{
+  "120363423561902447@g.us": {
+    "label": "family-vault",
+    "workspace": "~/Library/Mobile Documents/com~apple~CloudDocs/FamilyDocs",
+    "accessControl": {
+      "allowedPaths": ["~/Library/Mobile Documents/com~apple~CloudDocs/FamilyDocs/**"],
+      "allowedSkills": ["family-docs"],
+      "allowedTools": ["read", "write", "edit", "message", "web_search"],
+      "deniedTools": ["exec", "process", "browser", "canvas", "nodes", "subagents"]
+    }
+  }
+}
+```
+
+---
+
+#### `accessControl.allowedPaths`
+
+**Type:** `string[]` (glob patterns)  
+**Default:** No restrictions (all paths accessible)
+
+Whitelist of file system paths the group can access via `read`, `write`, and `edit` tools. If set, ONLY these paths are accessible.
+
+**Pattern syntax:**
+| Pattern | Meaning |
+|---|---|
+| `~/Documents/**` | All files recursively under Documents |
+| `~/Documents/*` | Files directly in Documents (one level) |
+| `~/Documents/report.md` | Specific file only |
+
+**Precedence:** `allowedPaths` is checked first. If the path doesn't match any pattern, access is denied.
+
+**Example:**
+
+```json
+{
+  "allowedPaths": [
+    "~/Library/Mobile Documents/com~apple~CloudDocs/FamilyDocs/**",
+    "/Volumes/SecureDrive/family/**"
+  ]
+}
+```
+
+**Behavior:**
+
+- `~/Library/Mobile Documents/com~apple~CloudDocs/FamilyDocs/deed.pdf` → ✅ Allowed
+- `~/Developer/openclaw` → 🚫 Denied (not in allowed paths)
+
+**Notes:**
+
+- Tilde (`~`) expands to user home directory
+- Paths are normalized before matching
+- Symlinks are resolved before checking
+- Path traversal (`../`) is blocked
+
+---
+
+#### `accessControl.deniedPaths`
+
+**Type:** `string[]` (glob patterns)  
+**Default:** None
+
+Blacklist of paths to deny, even if they match `allowedPaths`. Applied AFTER `allowedPaths`.
+
+**Use case:** Allow a directory tree but exclude sensitive subdirectories.
+
+**Example:**
+
+```json
+{
+  "allowedPaths": ["~/Developer/client/**"],
+  "deniedPaths": ["~/Developer/client/secrets/**", "~/Developer/client/.env*"]
+}
+```
+
+**Behavior:**
+
+- `~/Developer/client/project.md` → ✅ Allowed (matches allowed, not denied)
+- `~/Developer/client/secrets/api-key.txt` → 🚫 Denied (matches denied)
+- `~/Developer/client/.env` → 🚫 Denied (matches denied)
+
+---
+
+#### `accessControl.allowedSkills`
+
+**Type:** `string[]` (skill names)  
+**Default:** No restrictions (all skills loaded)
+
+Whitelist of skills that will be loaded into the agent's prompt for this group. If set, ONLY these skills are available.
+
+**Example:**
+
+```json
+{
+  "allowedSkills": ["family-docs", "home-automation"]
+}
+```
+
+**Behavior:**
+
+- Agent prompt includes only `family-docs` and `home-automation` skills
+- Other workspace skills are filtered out
+- Bundled skills are also filtered (if allowedSkills is set)
+
+**Notes:**
+
+- Skill names must match skill directory names exactly (case-sensitive)
+- Applied after global `skills.allow/deny` config
+- Empty array means no skills loaded
+
+---
+
+#### `accessControl.deniedSkills`
+
+**Type:** `string[]` (skill names)  
+**Default:** None
+
+Blacklist of skills to exclude from this group. Applied AFTER `allowedSkills`.
+
+**Example:**
+
+```json
+{
+  "deniedSkills": ["external-api", "social-media"]
+}
+```
+
+---
+
+#### `accessControl.allowedTools`
+
+**Type:** `string[]` (tool names)  
+**Default:** No restrictions (all tools available)
+
+Whitelist of tools the agent can use in this group. If set, ONLY these tools are available.
+
+**Common tool names:**
+| Tool | Description |
+|---|---|
+| `read` | Read file contents |
+| `write` | Create/overwrite files |
+| `edit` | Make precise file edits |
+| `exec` | Execute shell commands |
+| `process` | Manage background processes |
+| `browser` | Control web browser |
+| `canvas` | Present canvas content |
+| `nodes` | Control paired devices |
+| `message` | Send messages |
+| `subagents` | Spawn sub-agents |
+| `web_search` | Search the web |
+| `web_fetch` | Fetch web content |
+| `tts` | Text-to-speech |
+| `image` | Image analysis |
+
+**Example:**
+
+```json
+{
+  "allowedTools": ["read", "write", "edit", "message", "web_search"]
+}
+```
+
+**Behavior:**
+
+- Agent can read, write, edit files, send messages, and search the web
+- Cannot use `exec` (shell commands), `browser`, `canvas`, etc.
+- Tool calls to denied tools return an error message
+
+**Notes:**
+
+- Tool names are case-sensitive
+- Applied after global tool policy and channel-level group policy
+- Empty array means no tools available (rarely useful)
+
+---
+
+#### `accessControl.deniedTools`
+
+**Type:** `string[]` (tool names)  
+**Default:** None
+
+Blacklist of tools to deny for this group. Applied AFTER `allowedTools`.
+
+**Common denied tools for high-security groups:**
+| Tool | Why deny? |
+|---|---|
+| `exec` / `process` | Shell commands can bypass file path guards |
+| `browser` | External browser automation |
+| `canvas` | Presentation features |
+| `nodes` | Device control |
+| `subagents` | Spawning child agents |
+
+**Example:**
+
+```json
+{
+  "deniedTools": ["exec", "process", "browser", "canvas", "nodes", "subagents"]
+}
+```
+
+---
+
+#### `accessControl.emailAccount`
+
+**Type:** `string` (account ID)  
+**Default:** Default email account
+
+Email account to use for outbound messages from this group. Prepares for future email skill integration.
+
+**Example:**
+
+```json
+{
+  "emailAccount": "family-vault@icloud.com"
+}
+```
+
+**Notes:**
+
+- Currently a placeholder for future email skill implementation
+- Will route outbound emails through the specified account
+- Useful for separating work/personal email contexts
+
+---
+
+#### Precedence Rules
+
+Access control follows this evaluation order:
+
+**Path Access:**
+
+1. If `allowedPaths` is non-empty → path MUST match at least one pattern
+2. If `deniedPaths` is non-empty → path must NOT match any pattern
+3. If neither is set → all paths allowed
+
+**Skill Access:**
+
+1. Skills filtered by global `skills.allow/deny` config first
+2. If `allowedSkills` is non-empty → skill MUST be in the list
+3. If `deniedSkills` is non-empty → skill must NOT be in the list
+
+**Tool Access:**
+
+1. Tools filtered by global `tools.allow/deny` config first
+2. Tools filtered by channel-level group policy (if any)
+3. If `allowedTools` is non-empty → tool MUST be in the list
+4. If `deniedTools` is non-empty → tool must NOT be in the list
+5. **Result:** Intersection of all allow lists, union of all deny lists
+
+---
+
+#### Security Considerations
+
+**Exec Tool Escape Hatch:**
+The `exec` tool can bypass file path guards via shell commands. For high-security groups, deny `exec` entirely:
+
+```json
+{
+  "deniedTools": ["exec", "process"]
+}
+```
+
+**Symlink Traversal:**
+The path guard resolves symlinks before checking. A symlink inside an allowed directory pointing outside will be caught.
+
+**Subagent Inheritance:**
+Subagents spawned from a group session inherit the group's access control. The spawn tool propagates the session key context.
 
 ---
 
@@ -241,11 +546,11 @@ Files from the main workspace to symlink into each group workspace.
 
 **Default shared files:**
 
-| File | Purpose | Why shared? |
-|---|---|---|
-| `SOUL.md` | Agent personality and core instructions | Identity is consistent |
-| `USER.md` | User information and preferences | User doesn't change |
-| `TOOLS.md` | Tool configuration and preferences | Tool config is universal |
+| File       | Purpose                                 | Why shared?              |
+| ---------- | --------------------------------------- | ------------------------ |
+| `SOUL.md`  | Agent personality and core instructions | Identity is consistent   |
+| `USER.md`  | User information and preferences        | User doesn't change      |
+| `TOOLS.md` | Tool configuration and preferences      | Tool config is universal |
 
 **Common additions:**
 
@@ -255,7 +560,7 @@ Files from the main workspace to symlink into each group workspace.
     "SOUL.md",
     "USER.md",
     "TOOLS.md",
-    "IDENTITY.md",        // Agent name/emoji
+    "IDENTITY.md", // Agent name/emoji
     "memory/core-facts.md" // Shared knowledge base
   ]
 }
@@ -263,18 +568,18 @@ Files from the main workspace to symlink into each group workspace.
 
 **Files NOT shared (per-group):**
 
-| File | Purpose | Why NOT shared? |
-|---|---|---|
-| `AGENTS.md` | Group-specific instructions | Each group has different behavior |
-| `memory/*.md` | Memory files | **This is the isolation boundary** |
-| `HEARTBEAT.md` | Heartbeat behavior | Group-specific timing/actions |
-| `BOOTSTRAP.md` | Onboarding messages | Group-specific first messages |
+| File           | Purpose                     | Why NOT shared?                    |
+| -------------- | --------------------------- | ---------------------------------- |
+| `AGENTS.md`    | Group-specific instructions | Each group has different behavior  |
+| `memory/*.md`  | Memory files                | **This is the isolation boundary** |
+| `HEARTBEAT.md` | Heartbeat behavior          | Group-specific timing/actions      |
+| `BOOTSTRAP.md` | Onboarding messages         | Group-specific first messages      |
 
 **Advanced: Maximum isolation**
 
 ```json
 {
-  "sharedFiles": ["SOUL.md"]  // Only core identity shared
+  "sharedFiles": ["SOUL.md"] // Only core identity shared
 }
 ```
 
@@ -286,13 +591,14 @@ Files from the main workspace to symlink into each group workspace.
     "SOUL.md",
     "USER.md",
     "TOOLS.md",
-    "memory/facts.md",           // Shared facts
-    "memory/company-info.md"     // Shared company knowledge
+    "memory/facts.md", // Shared facts
+    "memory/company-info.md" // Shared company knowledge
   ]
 }
 ```
 
 **Symlink behavior:**
+
 - Files are symlinked, not copied (no disk duplication)
 - Changes to shared files propagate immediately
 - Broken symlinks are logged as warnings
@@ -311,15 +617,18 @@ Controls which session transcripts and memory files are searchable when the agen
 #### `"group-only"` (Strictest isolation)
 
 **Searchable content:**
+
 - Session transcript: Current group ONLY
 - Memory files: Group workspace ONLY
 
 **Not searchable:**
+
 - Other group transcripts
 - Main workspace memories
 - DM session transcript
 
 **Use when:**
+
 - Maximum separation required (client work, sensitive docs)
 - No cross-contamination allowed
 - Compliance requires strict boundaries
@@ -333,6 +642,7 @@ Controls which session transcripts and memory files are searchable when the agen
 ```
 
 **Behavior:**
+
 ```
 In preseed-client group:
   Search "Phase 2" → ✅ Results from preseed-client workspace
@@ -347,14 +657,17 @@ In family-vault group:
 #### `"group+main"` (Moderate isolation)
 
 **Searchable content:**
+
 - Session transcript: Current group + main DM session
 - Memory files: Group workspace + main workspace
 
 **Not searchable:**
+
 - Other group transcripts
 - Other group workspaces
 
 **Use when:**
+
 - You want isolation between groups
 - But still need personal context from DMs
 - Main workspace has shared knowledge
@@ -368,6 +681,7 @@ In family-vault group:
 ```
 
 **Behavior:**
+
 ```
 In preseed-client group:
   Search "Phase 2"    → ✅ Results from preseed-client + main
@@ -383,10 +697,12 @@ In DM session (main):
 #### `"all"` (No memory isolation)
 
 **Searchable content:**
+
 - Session transcript: All groups + all sessions
 - Memory files: All workspaces
 
 **Use when:**
+
 - You want workspace separation (different `AGENTS.md` per group)
 - But shared memory search across all contexts
 - You trust the agent to not mix contexts inappropriately
@@ -400,6 +716,7 @@ In DM session (main):
 ```
 
 **Behavior:**
+
 ```
 In any group:
   Search → ✅ All transcripts and all workspace memories
@@ -411,9 +728,9 @@ In any group:
 
 ## Complete Examples
 
-### Example 1: Strict Client/Family Isolation
+### Example 1: Strict Client/Family Isolation with Access Control
 
-**Scenario:** Client work and family docs must never mix.
+**Scenario:** Client work and family docs must never mix. Family vault has maximum restrictions.
 
 ```json
 {
@@ -423,10 +740,32 @@ In any group:
       "memoryScope": "group-only",
       "groups": {
         "120363404078961545@g.us": {
-          "label": "preseed-client"
+          "label": "preseed-client",
+          "accessControl": {
+            "allowedPaths": ["~/Developer/preseed/**", "~/Documents/clients/preseed/**"],
+            "deniedPaths": ["~/Developer/preseed/.env*"],
+            "allowedSkills": ["client-work"],
+            "allowedTools": [
+              "read",
+              "write",
+              "edit",
+              "exec",
+              "process",
+              "web_search",
+              "web_fetch",
+              "message"
+            ]
+          }
         },
         "120363423561902447@g.us": {
-          "label": "family-vault"
+          "label": "family-vault",
+          "workspace": "~/Library/Mobile Documents/com~apple~CloudDocs/FamilyDocs",
+          "accessControl": {
+            "allowedPaths": ["~/Library/Mobile Documents/com~apple~CloudDocs/FamilyDocs/**"],
+            "allowedSkills": ["family-docs"],
+            "allowedTools": ["read", "write", "edit", "message", "web_search"],
+            "deniedTools": ["exec", "process", "browser", "canvas", "nodes", "subagents"]
+          }
         }
       },
       "sharedFiles": ["SOUL.md", "USER.md", "TOOLS.md"]
@@ -436,15 +775,16 @@ In any group:
 ```
 
 **Result:**
-- Client group: Only sees client workspace/transcripts
-- Family group: Only sees family workspace/transcripts
-- No cross-contamination possible
+
+- Client group: Can access client paths, use shell commands, web search
+- Family vault: Only family documents, no shell commands, limited tools
+- Complete separation of file system and tool access
 
 ---
 
-### Example 2: Multi-Project with Shared Personal Context
+### Example 2: Multi-Project with Access Control
 
-**Scenario:** Multiple projects isolated from each other, but all can access personal DM context.
+**Scenario:** Multiple projects with per-project file boundaries and shared personal context.
 
 ```json
 {
@@ -453,9 +793,27 @@ In any group:
       "mode": "isolated",
       "memoryScope": "group+main",
       "groups": {
-        "project-a@g.us": { "label": "project-a" },
-        "project-b@g.us": { "label": "project-b" },
-        "project-c@g.us": { "label": "project-c" }
+        "project-a@g.us": {
+          "label": "project-a",
+          "accessControl": {
+            "allowedPaths": ["~/Developer/project-a/**"],
+            "allowedTools": ["read", "write", "edit", "exec", "process", "web_search"]
+          }
+        },
+        "project-b@g.us": {
+          "label": "project-b",
+          "accessControl": {
+            "allowedPaths": ["~/Developer/project-b/**"],
+            "allowedTools": ["read", "write", "edit", "exec", "process", "web_search"]
+          }
+        },
+        "project-c@g.us": {
+          "label": "project-c",
+          "accessControl": {
+            "allowedPaths": ["~/Developer/project-c/**"],
+            "allowedTools": ["read", "write", "edit", "web_search"]
+          }
+        }
       },
       "sharedFiles": ["SOUL.md", "USER.md", "TOOLS.md", "IDENTITY.md"]
     }
@@ -464,9 +822,10 @@ In any group:
 ```
 
 **Result:**
-- Each project: Isolated workspace + access to main workspace
-- Projects can't see each other's context
-- All projects can access personal info from DMs
+
+- Each project: Isolated workspace + file boundary + access to main workspace
+- Projects can't access each other's files
+- Project C has no shell access (more restricted)
 
 ---
 
@@ -496,6 +855,7 @@ In any group:
 ```
 
 **Result:**
+
 - Client workspace on encrypted drive
 - Team workspace in Dropbox (synced)
 
@@ -515,21 +875,22 @@ In any group:
         "personal-brand-a@g.us": { "label": "brand-a" },
         "personal-brand-b@g.us": { "label": "brand-b" }
       },
-      "sharedFiles": []  // No shared files
+      "sharedFiles": [] // No shared files
     }
   }
 }
 ```
 
 **Result:**
+
 - Each group has its own SOUL.md, USER.md, etc.
 - Completely independent personalities/identities
 
 ---
 
-### Example 5: Shared Knowledge Base
+### Example 5: High-Security Vault (Maximum Restrictions)
 
-**Scenario:** Isolated groups but shared company facts.
+**Scenario:** Family legal/financial documents with strictest possible restrictions.
 
 ```json
 {
@@ -538,25 +899,63 @@ In any group:
       "mode": "isolated",
       "memoryScope": "group-only",
       "groups": {
-        "sales-team@g.us": { "label": "sales" },
-        "support-team@g.us": { "label": "support" }
+        "120363423561902447@g.us": {
+          "label": "thakkar-rasania-vault",
+          "workspace": "~/Library/Mobile Documents/com~apple~CloudDocs/FamilyDocs",
+          "accessControl": {
+            "allowedPaths": ["~/Library/Mobile Documents/com~apple~CloudDocs/FamilyDocs/**"],
+            "allowedSkills": ["family-docs"],
+            "allowedTools": ["read", "write", "edit", "message"],
+            "deniedTools": ["exec", "process", "browser", "canvas", "nodes", "subagents"]
+          }
+        }
       },
-      "sharedFiles": [
-        "SOUL.md",
-        "USER.md",
-        "TOOLS.md",
-        "memory/company-facts.md",
-        "memory/product-specs.md"
-      ]
+      "sharedFiles": ["SOUL.md", "USER.md", "TOOLS.md"]
     }
   }
 }
 ```
 
 **Result:**
-- Sales and support groups isolated from each other
-- Both can access shared company knowledge
-- Group-specific memories remain separate
+
+- Only family documents accessible (no other paths)
+- Only family-docs skill loaded
+- Only read/write/edit/message tools available
+- No shell commands, no browser, no device control
+- Maximum security for sensitive documents
+
+---
+
+### Example 6: Team Coordination with Light Restrictions
+
+**Scenario:** Internal team coordination with minimal restrictions.
+
+```json
+{
+  "session": {
+    "groupIsolation": {
+      "mode": "isolated",
+      "memoryScope": "group+main",
+      "groups": {
+        "thousand-sunny@g.us": {
+          "label": "thousand-sunny",
+          "accessControl": {
+            "deniedPaths": ["~/Library/Mobile Documents/com~apple~CloudDocs/FamilyDocs/**"],
+            "deniedTools": []
+          }
+        }
+      },
+      "sharedFiles": ["SOUL.md", "USER.md", "TOOLS.md", "IDENTITY.md"]
+    }
+  }
+}
+```
+
+**Result:**
+
+- Team can access almost everything
+- Only family documents excluded
+- All tools available
 
 ---
 
@@ -566,14 +965,14 @@ The configuration is validated at gateway startup. Invalid config will prevent s
 
 ### Required Validations
 
-| Rule | Error Message |
-|---|---|
-| `mode` must be `"shared"` or `"isolated"` | `Invalid mode: must be "shared" or "isolated"` |
+| Rule                                                             | Error Message                                                       |
+| ---------------------------------------------------------------- | ------------------------------------------------------------------- |
+| `mode` must be `"shared"` or `"isolated"`                        | `Invalid mode: must be "shared" or "isolated"`                      |
 | `memoryScope` must be `"group-only"`, `"group+main"`, or `"all"` | `Invalid memoryScope: must be "group-only", "group+main", or "all"` |
-| `groups` keys must be valid group JIDs (contain `@`) | `Invalid group JID: {key}` |
-| `label` must be filesystem-safe | `Invalid label: {label} contains invalid characters` |
-| `workspace` path must be absolute or start with `~` | `Invalid workspace path: {path}` |
-| `sharedFiles` must be array of strings | `sharedFiles must be an array of strings` |
+| `groups` keys must be valid group JIDs (contain `@`)             | `Invalid group JID: {key}`                                          |
+| `label` must be filesystem-safe                                  | `Invalid label: {label} contains invalid characters`                |
+| `workspace` path must be absolute or start with `~`              | `Invalid workspace path: {path}`                                    |
+| `sharedFiles` must be array of strings                           | `sharedFiles must be an array of strings`                           |
 
 ### Example Validation Errors
 
@@ -594,11 +993,11 @@ Error: Invalid label in session.groupIsolation.groups["120@g.us"]: "../escape" (
 
 No environment variables directly affect `session.groupIsolation`. Standard OpenClaw environment variables apply:
 
-| Variable | Effect on Group Isolation |
-|---|---|
-| `OPENCLAW_STATE_DIR` | Changes base directory for `workspace-groups/` |
-| `DEBUG=openclaw:agents:*` | Enables workspace resolution logging |
-| `DEBUG=openclaw:memory:*` | Enables memory scope filtering logs |
+| Variable                  | Effect on Group Isolation                      |
+| ------------------------- | ---------------------------------------------- |
+| `OPENCLAW_STATE_DIR`      | Changes base directory for `workspace-groups/` |
+| `DEBUG=openclaw:agents:*` | Enables workspace resolution logging           |
+| `DEBUG=openclaw:memory:*` | Enables memory scope filtering logs            |
 
 **Debug logging:**
 
@@ -644,8 +1043,10 @@ Controls transcript retention. Works independently of group isolation:
 ```json
 {
   "session": {
-    "keepRecent": 100,  // Keep last 100 messages per session
-    "groupIsolation": { /* ... */ }
+    "keepRecent": 100, // Keep last 100 messages per session
+    "groupIsolation": {
+      /* ... */
+    }
   }
 }
 ```
@@ -661,11 +1062,13 @@ Agent-level workspace override. Takes precedence over group isolation:
   "agents": [
     {
       "id": "luffy",
-      "workspace": "~/custom-workspace"  // Overrides all group isolation
+      "workspace": "~/custom-workspace" // Overrides all group isolation
     }
   ],
   "session": {
-    "groupIsolation": { /* ignored for luffy */ }
+    "groupIsolation": {
+      /* ignored for luffy */
+    }
   }
 }
 ```
@@ -709,6 +1112,7 @@ Agent-level workspace override. Takes precedence over group isolation:
 **Risk:** Malicious `workspace` path could symlink to sensitive locations.
 
 **Mitigation:**
+
 - Validate `workspace` paths (no `..` traversal)
 - Restrict to user home directory or explicit whitelist
 - Run gateway with least privilege
@@ -718,6 +1122,7 @@ Agent-level workspace override. Takes precedence over group isolation:
 **Risk:** Incorrect `memoryScope` could leak context between groups.
 
 **Mitigation:**
+
 - Default to `"group-only"` (strictest)
 - Validate at config load time
 - Log all memory scope resolutions in debug mode
@@ -727,6 +1132,7 @@ Agent-level workspace override. Takes precedence over group isolation:
 **Risk:** Group workspaces created with incorrect permissions.
 
 **Mitigation:**
+
 - Auto-create with `0700` permissions (user-only)
 - Warn if workspace is world-readable
 - Document recommended permissions
@@ -735,12 +1141,14 @@ Agent-level workspace override. Takes precedence over group isolation:
 
 ## See Also
 
-- [Group Session Isolation Guide](../guides/group-session-isolation-guide.md) — Usage guide
-- [Migration Guide](../guides/migrating-to-group-isolation.md) — Enabling isolation for existing setups
+- [Group Session Isolation Guide](../guides/group-session-isolation-guide.md) — Usage guide with access control section
+- [Migration Guide: Enabling Isolation](../guides/migrating-to-group-isolation.md) — First-time setup
+- [Migration Guide: Adding Access Control](../guides/migrating-to-group-access-control.md) — Adding restrictions to existing groups
+- [Deployment Checklist](../deployment/group-access-control-deployment.md) — Production rollout
 - [Session Management](./session-management-compaction.md) — Session lifecycle
 - [Memory System](../../concepts/memory.md) — How memory indexing works
 
 ---
 
-**Last Updated:** 2026-02-15  
+**Last Updated:** 2026-02-16  
 **Status:** Beta (feature/group-session-isolation branch)
