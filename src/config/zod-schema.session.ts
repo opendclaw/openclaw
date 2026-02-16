@@ -154,6 +154,19 @@ export const SessionSchema = z
                 label: z.string().optional(),
                 /** Explicit workspace path override for this group. */
                 workspace: z.string().optional(),
+                /** Access control constraints for this group. */
+                accessControl: z
+                  .object({
+                    allowedPaths: z.array(z.string()).optional(),
+                    deniedPaths: z.array(z.string()).optional(),
+                    allowedSkills: z.array(z.string()).optional(),
+                    deniedSkills: z.array(z.string()).optional(),
+                    allowedTools: z.array(z.string()).optional(),
+                    deniedTools: z.array(z.string()).optional(),
+                    emailAccount: z.string().optional(),
+                  })
+                  .strict()
+                  .optional(),
               })
               .strict(),
           )

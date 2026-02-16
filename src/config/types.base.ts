@@ -108,12 +108,25 @@ export type GroupIsolationMode = "shared" | "isolated";
 /** Memory search scope when group isolation is active. */
 export type GroupMemoryScope = "group-only" | "group+main" | "all";
 
+/** Access control constraints for a specific group. */
+export type GroupAccessControl = {
+  allowedPaths?: string[];
+  deniedPaths?: string[];
+  allowedSkills?: string[];
+  deniedSkills?: string[];
+  allowedTools?: string[];
+  deniedTools?: string[];
+  emailAccount?: string;
+};
+
 /** Per-group configuration within groupIsolation. */
 export type GroupIsolationGroupConfig = {
   /** Human-friendly label used as the isolated workspace directory name. */
   label?: string;
   /** Explicit workspace path override for this group. */
   workspace?: string;
+  /** Access control constraints for this group. */
+  accessControl?: GroupAccessControl;
 };
 
 /**
