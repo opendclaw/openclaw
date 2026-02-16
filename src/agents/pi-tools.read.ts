@@ -11,6 +11,7 @@ import type { AnyAgentTool } from "./pi-tools.types.js";
 import { assertSandboxPath } from "./sandbox-paths.js";
 import type { SandboxFsBridge } from "./sandbox/fs-bridge.js";
 import { sanitizeToolResultImages } from "./tool-images.js";
+import { type GroupPathPolicy, guardPath } from "./group-access-guard.js";
 
 // NOTE(steipete): Upstream read now does file-magic MIME detection; we keep the wrapper
 // to normalize payloads and sanitize oversized images before they hit providers.
@@ -887,4 +888,43 @@ function createFsAccessError(code: string, filePath: string): NodeJS.ErrnoExcept
   const error = new Error(`Sandbox FS error (${code}): ${filePath}`) as NodeJS.ErrnoException;
   error.code = code;
   return error;
+}
+
+// ── Group Access Guard ───────────────────────────────────────────────────────
+
+/**
+ * Wrap a file tool (read/write/edit) with group path access enforcement.
+ * If the resolved file path is outside the group's allowed paths, the tool
+ * returns an error instead of executing.
+ */
+export function wrapToolGroupAccessGuard(
+  tool: AnyAgentTool,
+  policy: GroupPathPolicy,
+  workspaceDir: string,
+): AnyAgentTool {
+  return {
+    ...tool,
+    execute: async (toolCallId, params, signal, onUpdate) => {
+      const normalized = normalizeToolParams(params);
+      const record =
+        normalized ??
+        (params && typeof params === "object" ? (params as Record<string, unknown>) : undefined);
+      const filePath = record?.path ?? record?.file_path;
+      if (typeof filePath === "string" && filePath.trim()) {
+        const check = guardPath(filePath, policy, workspaceDir);
+        if (!check.allowed) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `Access denied: ${check.reason ?? "Path not allowed for this group."}`,
+              },
+            ],
+            isError: true,
+          };
+        }
+      }
+      return tool.execute(toolCallId, params, signal, onUpdate);
+    },
+  };
 }

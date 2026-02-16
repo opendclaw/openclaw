@@ -23,6 +23,7 @@ import { wrapToolWithBeforeToolCallHook } from "./pi-tools.before-tool-call.js";
 import {
   isToolAllowedByPolicies,
   resolveEffectiveToolPolicy,
+  resolveGroupAccessControl,
   resolveGroupToolPolicy,
   resolveSubagentToolPolicy,
 } from "./pi-tools.policy.js";
@@ -39,6 +40,7 @@ import {
   wrapToolWorkspaceRootGuard,
   wrapToolWorkspaceRootGuardWithOptions,
   wrapToolParamNormalization,
+  wrapToolGroupAccessGuard,
 } from "./pi-tools.read.js";
 import { cleanToolSchemaForGemini, normalizeToolParameters } from "./pi-tools.schema.js";
 import type { AnyAgentTool } from "./pi-tools.types.js";
@@ -328,6 +330,24 @@ export function createOpenClawCodingTools(options?: {
   }
   const imageSanitization = resolveImageSanitizationLimits(options?.config);
 
+  // Resolve group path access policy for file boundary enforcement
+  const groupAccessControl = resolveGroupAccessControl(
+    options?.config,
+    options?.sessionKey,
+    options?.spawnedBy,
+  );
+  const groupPathPolicy =
+    groupAccessControl?.allowedPaths || groupAccessControl?.deniedPaths
+      ? {
+          allowedPaths: groupAccessControl.allowedPaths ?? [],
+          deniedPaths: groupAccessControl.deniedPaths ?? [],
+        }
+      : undefined;
+
+  /** Optionally wrap a file tool with group path enforcement. */
+  const applyGroupGuard = (tool: AnyAgentTool): AnyAgentTool =>
+    groupPathPolicy ? wrapToolGroupAccessGuard(tool, groupPathPolicy, workspaceRoot) : tool;
+
   const base = (codingTools as unknown as AnyAgentTool[]).flatMap((tool) => {
     if (tool.name === readTool.name) {
       if (sandboxRoot) {
@@ -338,11 +358,13 @@ export function createOpenClawCodingTools(options?: {
           imageSanitization,
         });
         return [
-          workspaceOnly
-            ? wrapToolWorkspaceRootGuardWithOptions(sandboxed, sandboxRoot, {
-                containerWorkdir: sandbox.containerWorkdir,
-              })
-            : sandboxed,
+          applyGroupGuard(
+            workspaceOnly
+              ? wrapToolWorkspaceRootGuardWithOptions(sandboxed, sandboxRoot, {
+                  containerWorkdir: sandbox.containerWorkdir,
+                })
+              : sandboxed,
+          ),
         ];
       }
       const freshReadTool = createReadTool(workspaceRoot);
@@ -350,7 +372,7 @@ export function createOpenClawCodingTools(options?: {
         modelContextWindowTokens: options?.modelContextWindowTokens,
         imageSanitization,
       });
-      return [workspaceOnly ? wrapToolWorkspaceRootGuard(wrapped, workspaceRoot) : wrapped];
+      return [applyGroupGuard(workspaceOnly ? wrapToolWorkspaceRootGuard(wrapped, workspaceRoot) : wrapped)];
     }
     if (tool.name === "bash" || tool.name === execToolName) {
       return [];
@@ -360,14 +382,14 @@ export function createOpenClawCodingTools(options?: {
         return [];
       }
       const wrapped = createHostWorkspaceWriteTool(workspaceRoot, { workspaceOnly });
-      return [workspaceOnly ? wrapToolWorkspaceRootGuard(wrapped, workspaceRoot) : wrapped];
+      return [applyGroupGuard(workspaceOnly ? wrapToolWorkspaceRootGuard(wrapped, workspaceRoot) : wrapped)];
     }
     if (tool.name === "edit") {
       if (sandboxRoot) {
         return [];
       }
       const wrapped = createHostWorkspaceEditTool(workspaceRoot, { workspaceOnly });
-      return [workspaceOnly ? wrapToolWorkspaceRootGuard(wrapped, workspaceRoot) : wrapped];
+      return [applyGroupGuard(workspaceOnly ? wrapToolWorkspaceRootGuard(wrapped, workspaceRoot) : wrapped)];
     }
     return [tool];
   });
