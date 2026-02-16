@@ -6,6 +6,8 @@ import {
   filterToolsByPolicy,
   isToolAllowedByPolicyName,
   resolveSubagentToolPolicy,
+  resolveGroupAccessControl,
+  resolveGroupToolPolicy,
 } from "./pi-tools.policy.js";
 
 function createStubTool(name: string): AgentTool {
@@ -185,5 +187,137 @@ describe("resolveSubagentToolPolicy depth awareness", () => {
     const policy = resolveSubagentToolPolicy(leafCfg);
     // Default depth=1, maxSpawnDepth=1 → leaf
     expect(isToolAllowedByPolicyName("sessions_spawn", policy)).toBe(false);
+  });
+});
+
+} from "./pi-tools.policy.js";
+
+function makeConfig(overrides?: Partial<OpenClawConfig>): OpenClawConfig {
+  return {
+    session: {
+      groupIsolation: {
+        mode: "isolated",
+        groups: {
+          "120363404078961545@g.us": {
+            label: "vault",
+            workspace: "~/Family Documents",
+            accessControl: {
+              allowedTools: ["read", "write", "edit", "message"],
+              deniedTools: ["browser", "canvas", "nodes"],
+            },
+          },
+          "999@g.us": {
+            label: "open-group",
+          },
+        },
+      },
+    },
+    ...overrides,
+  } as OpenClawConfig;
+}
+
+describe("resolveGroupAccessControl", () => {
+  it("returns accessControl for enrolled group session", () => {
+    const cfg = makeConfig();
+    const ac = resolveGroupAccessControl(
+      cfg,
+      "agent:franky:whatsapp:group:120363404078961545@g.us",
+    );
+    expect(ac).toBeDefined();
+    expect(ac?.allowedTools).toEqual(["read", "write", "edit", "message"]);
+    expect(ac?.deniedTools).toEqual(["browser", "canvas", "nodes"]);
+  });
+
+  it("returns undefined for group without accessControl", () => {
+    const cfg = makeConfig();
+    const ac = resolveGroupAccessControl(cfg, "agent:franky:whatsapp:group:999@g.us");
+    expect(ac).toBeUndefined();
+  });
+
+  it("returns undefined for DM sessions", () => {
+    const cfg = makeConfig();
+    const ac = resolveGroupAccessControl(cfg, "agent:franky:whatsapp:dm:someone");
+    expect(ac).toBeUndefined();
+  });
+
+  it("returns undefined when isolation mode is shared", () => {
+    const cfg = makeConfig({
+      session: {
+        groupIsolation: {
+          mode: "shared",
+          groups: {
+            "120363404078961545@g.us": {
+              label: "vault",
+              accessControl: { allowedTools: ["read"] },
+            },
+          },
+        },
+      },
+    } as Partial<OpenClawConfig>);
+    const ac = resolveGroupAccessControl(
+      cfg,
+      "agent:franky:whatsapp:group:120363404078961545@g.us",
+    );
+    expect(ac).toBeUndefined();
+  });
+
+  it("returns undefined when no config", () => {
+    expect(
+      resolveGroupAccessControl(undefined, "agent:franky:whatsapp:group:123@g.us"),
+    ).toBeUndefined();
+  });
+
+  it("resolves from spawnedBy when sessionKey has no group", () => {
+    const cfg = makeConfig();
+    const ac = resolveGroupAccessControl(
+      cfg,
+      "agent:franky:subagent:abc123",
+      "agent:franky:whatsapp:group:120363404078961545@g.us",
+    );
+    expect(ac).toBeDefined();
+    expect(ac?.allowedTools).toEqual(["read", "write", "edit", "message"]);
+  });
+});
+
+describe("resolveGroupToolPolicy with accessControl", () => {
+  it("returns tool policy from accessControl for vault group", () => {
+    const cfg = makeConfig();
+    const policy = resolveGroupToolPolicy({
+      config: cfg,
+      sessionKey: "agent:franky:whatsapp:group:120363404078961545@g.us",
+      messageProvider: "whatsapp",
+      groupId: "120363404078961545@g.us",
+    });
+    expect(policy).toBeDefined();
+    // Should include the isolation accessControl restrictions
+    expect(policy?.allow).toEqual(["read", "write", "edit", "message"]);
+    expect(policy?.deny).toContain("browser");
+    expect(policy?.deny).toContain("canvas");
+    expect(policy?.deny).toContain("nodes");
+  });
+
+  it("returns undefined for non-group sessions", () => {
+    const cfg = makeConfig();
+    const policy = resolveGroupToolPolicy({
+      config: cfg,
+      sessionKey: "agent:franky:whatsapp:dm:someone",
+    });
+    expect(policy).toBeUndefined();
+  });
+
+  it("allowed tools filter correctly", () => {
+    const cfg = makeConfig();
+    const policy = resolveGroupToolPolicy({
+      config: cfg,
+      sessionKey: "agent:franky:whatsapp:group:120363404078961545@g.us",
+      messageProvider: "whatsapp",
+      groupId: "120363404078961545@g.us",
+    });
+    // read is allowed
+    expect(isToolAllowedByPolicyName("read", policy)).toBe(true);
+    // exec is NOT in allowedTools → should be denied
+    expect(isToolAllowedByPolicyName("exec", policy)).toBe(false);
+    // browser is explicitly denied
+    expect(isToolAllowedByPolicyName("browser", policy)).toBe(false);
   });
 });

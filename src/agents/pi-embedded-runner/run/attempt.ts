@@ -54,6 +54,7 @@ import { subscribeEmbeddedPiSession } from "../../pi-embedded-subscribe.js";
 import { createPreparedEmbeddedPiSettingsManager } from "../../pi-project-settings.js";
 import { toClientToolDefinitions } from "../../pi-tool-definition-adapter.js";
 import { createOpenClawCodingTools, resolveToolLoopDetectionConfig } from "../../pi-tools.js";
+import { resolveGroupAccessControl } from "../../pi-tools.policy.js";
 import { resolveSandboxContext } from "../../sandbox.js";
 import { resolveSandboxRuntimeStatus } from "../../sandbox/runtime-status.js";
 import { repairSessionFileIfNeeded } from "../../session-file-repair.js";
@@ -467,11 +468,13 @@ export async function runEmbeddedAttempt(
           config: params.config,
         });
 
+    const groupAccessControl = resolveGroupAccessControl(params.config, params.sessionKey);
     const skillsPrompt = resolveSkillsPromptForRun({
       skillsSnapshot: params.skillsSnapshot,
       entries: shouldLoadSkillEntries ? skillEntries : undefined,
       config: params.config,
       workspaceDir: effectiveWorkspace,
+      groupAccessControl,
     });
 
     const sessionLabel = params.sessionKey ?? params.sessionId;

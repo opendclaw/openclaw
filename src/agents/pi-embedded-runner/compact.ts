@@ -41,6 +41,7 @@ import {
 } from "../pi-embedded-helpers.js";
 import { createPreparedEmbeddedPiSettingsManager } from "../pi-project-settings.js";
 import { createOpenClawCodingTools } from "../pi-tools.js";
+import { resolveGroupAccessControl } from "../pi-tools.policy.js";
 import { resolveSandboxContext } from "../sandbox.js";
 import { repairSessionFileIfNeeded } from "../session-file-repair.js";
 import { guardSessionManager } from "../session-tool-result-guard-wrapper.js";
@@ -346,11 +347,13 @@ export async function compactEmbeddedPiSessionDirect(
           skills: skillEntries ?? [],
           config: params.config,
         });
+    const groupAccessControl = resolveGroupAccessControl(params.config, params.sessionKey);
     const skillsPrompt = resolveSkillsPromptForRun({
       skillsSnapshot: params.skillsSnapshot,
       entries: shouldLoadSkillEntries ? skillEntries : undefined,
       config: params.config,
       workspaceDir: effectiveWorkspace,
+      groupAccessControl,
     });
 
     const sessionLabel = params.sessionKey ?? params.sessionId;

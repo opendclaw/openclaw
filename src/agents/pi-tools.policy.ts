@@ -1,15 +1,17 @@
 import { getChannelDock } from "../channels/dock.js";
 import { DEFAULT_SUBAGENT_MAX_SPAWN_DEPTH } from "../config/agent-limits.js";
 import type { OpenClawConfig } from "../config/config.js";
+import type { GroupAccessControl } from "../config/types.base.js";
+import type { AnyAgentTool } from "./pi-tools.types.js";
+import type { SandboxToolPolicy } from "./sandbox.js";
 import { resolveChannelGroupToolsPolicy } from "../config/group-policy.js";
 import { normalizeAgentId } from "../routing/session-key.js";
 import { resolveThreadParentSessionKey } from "../sessions/session-key-utils.js";
 import { normalizeMessageChannel } from "../utils/message-channel.js";
 import { resolveAgentConfig, resolveAgentIdFromSessionKey } from "./agent-scope.js";
 import { compileGlobPatterns, matchesAnyGlobPattern } from "./glob-pattern.js";
-import type { AnyAgentTool } from "./pi-tools.types.js";
 import { pickSandboxToolPolicy } from "./sandbox-tool-policy.js";
-import type { SandboxToolPolicy } from "./sandbox.js";
+import { extractGroupIdFromSessionKey } from "./group-workspace.js";
 import { expandToolGroups, normalizeToolName } from "./tool-policy.js";
 
 function makeToolPolicyMatcher(policy: SandboxToolPolicy) {
@@ -248,6 +250,79 @@ export function resolveEffectiveToolPolicy(params: {
   };
 }
 
+/**
+ * Resolve the GroupAccessControl for a given group from the groupIsolation config.
+ * Returns undefined if no access control is configured.
+ */
+export function resolveGroupAccessControl(
+  config: OpenClawConfig | undefined,
+  sessionKey: string | undefined | null,
+  spawnedBy?: string | null,
+): GroupAccessControl | undefined {
+  if (!config) {
+    return undefined;
+  }
+  const groupId =
+    extractGroupIdFromSessionKey(sessionKey) ?? extractGroupIdFromSessionKey(spawnedBy);
+  if (!groupId) {
+    return undefined;
+  }
+  const isolation = config.session?.groupIsolation;
+  if (!isolation || isolation.mode !== "isolated") {
+    return undefined;
+  }
+  return isolation.groups?.[groupId]?.accessControl ?? undefined;
+}
+
+/**
+ * Convert a GroupAccessControl's tool restrictions into a SandboxToolPolicy.
+ */
+function groupAccessControlToToolPolicy(
+  ac: GroupAccessControl | undefined,
+): SandboxToolPolicy | undefined {
+  if (!ac) {
+    return undefined;
+  }
+  const allow = ac.allowedTools;
+  const deny = ac.deniedTools;
+  if (!allow && !deny) {
+    return undefined;
+  }
+  return {
+    ...(allow ? { allow } : {}),
+    ...(deny ? { deny } : {}),
+  };
+}
+
+/**
+ * Merge two tool policies so the result is MORE restrictive.
+ * - Allow = intersection (if both have allow lists)
+ * - Deny = union
+ */
+function mergeToolPolicies(
+  a: SandboxToolPolicy | undefined,
+  b: SandboxToolPolicy | undefined,
+): SandboxToolPolicy | undefined {
+  if (!a) {
+    return b;
+  }
+  if (!b) {
+    return a;
+  }
+
+  // Merge deny: union
+  const deny = a.deny || b.deny ? [...(a.deny ?? []), ...(b.deny ?? [])] : undefined;
+
+  // Merge allow: if both have allow lists, use the more restrictive one (b, the group isolation policy)
+  // If only one has an allow list, use it (it's more restrictive than allow-all)
+  const allow = a.allow && b.allow ? b.allow : (a.allow ?? b.allow);
+
+  if (!allow && !deny) {
+    return undefined;
+  }
+  return { allow, deny };
+}
+
 export function resolveGroupToolPolicy(params: {
   config?: OpenClawConfig;
   sessionKey?: string;
@@ -268,13 +343,19 @@ export function resolveGroupToolPolicy(params: {
   const sessionContext = resolveGroupContextFromSessionKey(params.sessionKey);
   const spawnedContext = resolveGroupContextFromSessionKey(params.spawnedBy);
   const groupId = params.groupId ?? sessionContext.groupId ?? spawnedContext.groupId;
+
+  // Resolve group isolation accessControl tool policy
+  const isolationToolPolicy = groupAccessControlToToolPolicy(
+    resolveGroupAccessControl(params.config, params.sessionKey, params.spawnedBy),
+  );
+
   if (!groupId) {
-    return undefined;
+    return isolationToolPolicy;
   }
   const channelRaw = params.messageProvider ?? sessionContext.channel ?? spawnedContext.channel;
   const channel = normalizeMessageChannel(channelRaw);
   if (!channel) {
-    return undefined;
+    return isolationToolPolicy;
   }
   let dock;
   try {
@@ -304,7 +385,11 @@ export function resolveGroupToolPolicy(params: {
       senderUsername: params.senderUsername,
       senderE164: params.senderE164,
     });
-  return pickSandboxToolPolicy(toolsConfig);
+  const channelPolicy = pickSandboxToolPolicy(toolsConfig);
+
+  // Merge channel-level group policy with isolation-level accessControl policy.
+  // Isolation policy is MORE restrictive (intersection of allows, union of denies).
+  return mergeToolPolicies(channelPolicy, isolationToolPolicy);
 }
 
 export function isToolAllowedByPolicies(

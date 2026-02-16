@@ -7,6 +7,14 @@ import {
   type Skill,
 } from "@mariozechner/pi-coding-agent";
 import type { OpenClawConfig } from "../../config/config.js";
+import type { GroupAccessControl } from "../../config/types.base.js";
+import type {
+  ParsedSkillFrontmatter,
+  SkillEligibilityContext,
+  SkillCommandSpec,
+  SkillEntry,
+  SkillSnapshot,
+} from "./types.js";
 import { createSubsystemLogger } from "../../logging/subsystem.js";
 import { CONFIG_DIR, resolveUserPath } from "../../utils.js";
 import { resolveSandboxPath } from "../sandbox-paths.js";
@@ -20,13 +28,6 @@ import {
 } from "./frontmatter.js";
 import { resolvePluginSkillDirs } from "./plugin-skills.js";
 import { serializeByKey } from "./serialize.js";
-import type {
-  ParsedSkillFrontmatter,
-  SkillEligibilityContext,
-  SkillCommandSpec,
-  SkillEntry,
-  SkillSnapshot,
-} from "./types.js";
 
 const fsp = fs.promises;
 const skillsLogger = createSubsystemLogger("skills");
@@ -521,14 +522,36 @@ export function resolveSkillsPromptForRun(params: {
   entries?: SkillEntry[];
   config?: OpenClawConfig;
   workspaceDir: string;
+  groupAccessControl?: GroupAccessControl;
 }): string {
   const snapshotPrompt = params.skillsSnapshot?.prompt?.trim();
-  if (snapshotPrompt) {
+  // If we have group access control with skill restrictions, we must re-filter
+  // even if a snapshot prompt exists, since the snapshot was built without group context.
+  if (
+    snapshotPrompt &&
+    !params.groupAccessControl?.allowedSkills &&
+    !params.groupAccessControl?.deniedSkills
+  ) {
     return snapshotPrompt;
   }
+  // If we have a snapshot with resolved skills and group filtering is needed, re-filter and rebuild
+  if (snapshotPrompt && params.skillsSnapshot?.resolvedSkills && params.groupAccessControl) {
+    const entries: SkillEntry[] = params.skillsSnapshot.resolvedSkills.map((skill) => ({
+      skill,
+      frontmatter: {},
+      metadata: {},
+      invocation: { userInvocable: true, disableModelInvocation: false },
+    }));
+    const filtered = filterWorkspaceSkillEntries(entries, params.config, params.groupAccessControl);
+    const prompt = formatSkillsForPrompt(filtered.map((e) => e.skill));
+    return prompt.trim() ? prompt : "";
+  }
   if (params.entries && params.entries.length > 0) {
+    const filtered = params.groupAccessControl
+      ? filterWorkspaceSkillEntries(params.entries, params.config, params.groupAccessControl)
+      : params.entries;
     const prompt = buildWorkspaceSkillsPrompt(params.workspaceDir, {
-      entries: params.entries,
+      entries: filtered,
       config: params.config,
     });
     return prompt.trim() ? prompt : "";
@@ -647,8 +670,18 @@ export async function syncSkillsToWorkspace(params: {
 export function filterWorkspaceSkillEntries(
   entries: SkillEntry[],
   config?: OpenClawConfig,
+  groupAccessControl?: GroupAccessControl,
 ): SkillEntry[] {
-  return filterSkillEntries(entries, config);
+  let filtered = filterSkillEntries(entries, config);
+  if (groupAccessControl?.allowedSkills) {
+    const allowed = groupAccessControl.allowedSkills;
+    filtered = filtered.filter((e) => allowed.includes(e.skill.name));
+  }
+  if (groupAccessControl?.deniedSkills) {
+    const denied = groupAccessControl.deniedSkills;
+    filtered = filtered.filter((e) => !denied.includes(e.skill.name));
+  }
+  return filtered;
 }
 
 export function buildWorkspaceSkillCommandSpecs(
