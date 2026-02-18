@@ -49,7 +49,7 @@ export class MemoryIndexManager extends MemoryManagerEmbeddingOps implements Mem
   protected readonly workspaceDir: string;
   protected readonly settings: ResolvedMemorySearchConfig;
   protected provider: EmbeddingProvider | null;
-  private readonly sessionKey?: string;
+  protected readonly sessionKey?: string;
   private readonly requestedProvider: "openai" | "local" | "gemini" | "voyage" | "mistral" | "auto";
   protected fallbackFrom?: "openai" | "local" | "gemini" | "voyage" | "mistral";
   protected fallbackReason?: string;

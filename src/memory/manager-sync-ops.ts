@@ -33,8 +33,8 @@ import {
 } from "./internal.js";
 import { type MemoryFileEntry } from "./internal.js";
 import { ensureMemoryIndexSchema } from "./memory-schema.js";
-import type { SessionFileEntry } from "./session-files.js";
 import { filterSessionFilesByScope, resolveEffectiveMemoryScope } from "./scoped-session-files.js";
+import type { SessionFileEntry } from "./session-files.js";
 import {
   buildSessionEntry,
   listSessionFilesForAgent,
@@ -89,6 +89,7 @@ function shouldIgnoreMemoryWatchPath(watchPath: string): boolean {
 export abstract class MemoryManagerSyncOps {
   protected abstract readonly cfg: OpenClawConfig;
   protected abstract readonly agentId: string;
+  protected abstract readonly sessionKey?: string;
   protected abstract readonly workspaceDir: string;
   protected abstract readonly settings: ResolvedMemorySearchConfig;
   protected provider: EmbeddingProvider | null = null;
