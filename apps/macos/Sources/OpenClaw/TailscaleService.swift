@@ -54,8 +54,17 @@ final class TailscaleService {
     #endif
 
     func checkAppInstallation() -> Bool {
-        let installed = FileManager().fileExists(atPath: "/Applications/Tailscale.app")
-        self.logger.info("Tailscale app installed: \(installed)")
+        let fileManager = FileManager()
+        let appBundlePath = "/Applications/Tailscale.app"
+        let binaryCandidates = [
+            "/Applications/Tailscale.app/Contents/MacOS/Tailscale",
+            "/usr/local/bin/tailscale",
+            "/opt/homebrew/bin/tailscale",
+        ]
+
+        let installed = fileManager.fileExists(atPath: appBundlePath)
+            || binaryCandidates.contains(where: { fileManager.isExecutableFile(atPath: $0) })
+        self.logger.info("Tailscale installed: \(installed)")
         return installed
     }
 
